@@ -11,14 +11,23 @@ const productRoutes = require("./routes/productRoutes");
 const recentlyViewedRoutes = require("./routes/recentlyViewedRoutes");
 const aboutRoutes = require("./routes/aboutRoutes");
 
-connectDB();
-
 const app = express();
 
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || "*" }));
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(morgan("dev"));
+
+// Ensure database is connected before handling any API requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("Database connection error in request:", err.message);
+    res.status(500).json({ message: "Database connection error: " + err.message });
+  }
+});
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
