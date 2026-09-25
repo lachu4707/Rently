@@ -1,47 +1,100 @@
 const asyncHandler = require("express-async-handler");
-const RecentlyViewed = require("../models/RecentlyViewed");
-const Product = require("../models/Product");
+const { getSupabaseClient } = require("../config/supabase");
+const { formatProduct } = require("../utils/formatters");
 
 // @route POST /api/recently-viewed/:productId
-// Call this from the frontend whenever a user opens the ProductModal.
+// Called when a user clicks/opens a Product
 const trackView = asyncHandler(async (req, res) => {
+  const supabase = getSupabaseClient();
   const { productId } = req.params;
+  const userId = req.user?.id || req.user?._id;
 
-  const product = await Product.findById(productId);
-  if (!product) {
+  // Verify product exists
+  const { data: product, error: findError } = await supabase
+    .from("products")
+    .select("id")
+    .eq("id", productId)
+    .single();
+
+  if (findError || !product) {
     res.status(404);
     throw new Error("Product not found");
   }
 
-  await RecentlyViewed.findOneAndUpdate(
-    { user: req.user._id, product: productId },
-    { viewedAt: new Date() },
-    { upsert: true, new: true }
-  );
+  // Upsert recently_viewed record
+  const { error: upsertError } = await supabase
+    .from("recently_viewed")
+    .upsert(
+      {
+        user_id: userId,
+        product_id: productId,
+        viewed_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,product_id" }
+    );
+
+  if (upsertError) {
+    res.status(500);
+    throw new Error("Failed to record view: " + upsertError.message);
+  }
 
   res.status(200).json({ message: "View recorded" });
 });
 
 // @route GET /api/recently-viewed
 const getRecentlyViewed = asyncHandler(async (req, res) => {
+  const supabase = getSupabaseClient();
+  const userId = req.user?.id || req.user?._id;
   const limit = Number(req.query.limit) || 20;
 
-  const entries = await RecentlyViewed.find({ user: req.user._id })
-    .sort({ viewedAt: -1 })
-    .limit(limit)
-    .populate("product");
+  const { data: entries, error } = await supabase
+    .from("recently_viewed")
+    .select(`
+      viewed_at,
+      product:products (
+        *,
+        owner:users (
+          id,
+          name,
+          location,
+          phone,
+          avatar_url
+        )
+      )
+    `)
+    .eq("user_id", userId)
+    .order("viewed_at", { ascending: false })
+    .limit(limit);
 
-  // Filter out entries whose product may have been deleted since
-  const products = entries.filter((e) => e.product).map((e) => e.product);
+  if (error) {
+    res.status(500);
+    throw new Error("Failed to fetch recently viewed items: " + error.message);
+  }
+
+  const products = (entries || [])
+    .filter((e) => e.product)
+    .map((e) => formatProduct(e.product));
+
   res.json(products);
 });
 
 // @route DELETE /api/recently-viewed/:productId
 const removeFromRecentlyViewed = asyncHandler(async (req, res) => {
-  await RecentlyViewed.deleteOne({
-    user: req.user._id,
-    product: req.params.productId,
-  });
+  const supabase = getSupabaseClient();
+  const userId = req.user?.id || req.user?._id;
+  const { productId } = req.params;
+
+  const { error } = await supabase
+    .from("recently_viewed")
+    .delete()
+    .eq("user_id", userId)
+    .eq("product_id", productId);
+
+  if (error) {
+    res.status(500);
+    throw new Error("Failed to remove from recently viewed: " + error.message);
+  }
+
   res.json({ message: "Removed from recently viewed" });
 });
 

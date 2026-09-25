@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const connectDB = require("./config/db");
+const { supabase } = require("./config/supabase");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
 const authRoutes = require("./routes/authRoutes");
@@ -18,22 +18,18 @@ app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(morgan("dev"));
 
-// Ensure database is connected before handling any API requests
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error("Database connection error in request:", err.message);
-    res.status(500).json({ message: "Database connection error: " + err.message });
-  }
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    database: "Supabase (Cloud PostgreSQL)",
+    supabaseConfigured: Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)),
+  });
 });
-
-app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/products", productRoutes); // powers Feed, Search, Sell, ProductModal
+app.use("/api/products", productRoutes);
 app.use("/api/recently-viewed", recentlyViewedRoutes);
 app.use("/api/about", aboutRoutes);
 
@@ -42,7 +38,7 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5001;
 if (process.env.NODE_ENV !== "production" || require.main === module) {
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  app.listen(PORT, () => console.log(`RentalHub API Server running on port ${PORT} (Database: Supabase Cloud)`));
 }
 
 module.exports = app;
