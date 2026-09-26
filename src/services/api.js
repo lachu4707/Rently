@@ -4,6 +4,75 @@ const API_BASE_URL =
     ? "/api"
     : "http://localhost:5001/api");
 
+export function getAuthToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("rentalhub_token");
+}
+
+export function getAuthUser() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("rentalhub_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthSession(token, user) {
+  if (typeof window === "undefined") return;
+  if (token) localStorage.setItem("rentalhub_token", token);
+  if (user) localStorage.setItem("rentalhub_user", JSON.stringify(user));
+}
+
+export function clearAuthSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("rentalhub_token");
+  localStorage.removeItem("rentalhub_user");
+}
+
+export async function loginUser(email, password) {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Failed to log in");
+  }
+
+  setAuthSession(data.token, {
+    id: data.id || data._id,
+    name: data.name,
+    email: data.email,
+  });
+
+  return data;
+}
+
+export async function registerUser({ name, email, password, phone, location }) {
+  const res = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password, phone, location }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Failed to register");
+  }
+
+  setAuthSession(data.token, {
+    id: data.id || data._id,
+    name: data.name,
+    email: data.email,
+  });
+
+  return data;
+}
+
 export async function fetchProducts(params = {}) {
   try {
     const query = new URLSearchParams();
@@ -25,11 +94,17 @@ export async function fetchProducts(params = {}) {
 }
 
 export async function createProduct(productData) {
+  const token = getAuthToken();
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_BASE_URL}/products`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(productData),
   });
 
@@ -57,3 +132,4 @@ export async function fetchProductById(id) {
 }
 
 export { API_BASE_URL };
+

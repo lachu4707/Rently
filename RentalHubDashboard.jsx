@@ -12,8 +12,13 @@ import {
   ChevronDown,
   Tag,
   ArrowUpDown,
+  LogIn,
+  LogOut,
+  UserCheck,
 } from "lucide-react";
-import { fetchProducts } from "./src/services/api.js";
+import { fetchProducts, getAuthUser, clearAuthSession } from "./src/services/api.js";
+import AuthModal from "./src/components/AuthModal.jsx";
+import RentBookingModal from "./src/components/RentBookingModal.jsx";
 
 /* ------------------------------------------------------------------
    RENTALHUB — dashboard
@@ -151,8 +156,43 @@ export default function RentalHubDashboard({ onNavigate }) {
   const [sort, setSort] = useState(null); // 'low' | 'high' | null
   const [toast, setToast] = useState(null);
   const [activeProduct, setActiveProduct] = useState(null);
+  const [rentingProduct, setRentingProduct] = useState(null);
   const [products, setProducts] = useState(CATEGORIES_DEMO);
   const [loading, setLoading] = useState(true);
+
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+
+  useEffect(() => {
+    setCurrentUser(getAuthUser());
+  }, []);
+
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user);
+    flash(`Welcome, ${user.name || user.email}!`);
+  };
+
+  const handleLogout = () => {
+    clearAuthSession();
+    setCurrentUser(null);
+    flash("Signed out successfully");
+  };
+
+  const openAuth = (mode = "login") => {
+    setAuthMode(mode);
+    setIsAuthOpen(true);
+  };
+
+  const handleRent = (product) => {
+    if (!currentUser) {
+      flash("Please sign in or register to rent an item");
+      openAuth("login");
+      return;
+    }
+    setRentingProduct(product);
+  };
 
   const loadProducts = async () => {
     try {
@@ -185,6 +225,19 @@ export default function RentalHubDashboard({ onNavigate }) {
   };
 
   const handleNav = (where, payload) => {
+    if (where === "sell" && !currentUser) {
+      flash("Please sign in or register to list items");
+      openAuth("register");
+      return;
+    }
+    if (where === "profile" && !currentUser) {
+      openAuth("login");
+      return;
+    }
+    if (where === "rent" && payload) {
+      handleRent(payload);
+      return;
+    }
     if (onNavigate) {
       onNavigate(where, payload);
       return;
@@ -223,7 +276,12 @@ export default function RentalHubDashboard({ onNavigate }) {
       <GoogleFontLoader />
 
       {/* ---------------- SIDEBAR ---------------- */}
-      <Sidebar onNav={handleNav} />
+      <Sidebar
+        currentUser={currentUser}
+        onNav={handleNav}
+        onOpenAuth={openAuth}
+        onLogout={handleLogout}
+      />
 
       {/* ---------------- MAIN ---------------- */}
       <main className="flex-1 min-w-0 flex flex-col">
@@ -235,6 +293,9 @@ export default function RentalHubDashboard({ onNavigate }) {
           sort={sort}
           setSort={setSort}
           isSearching={isSearching}
+          currentUser={currentUser}
+          onOpenAuth={openAuth}
+          onLogout={handleLogout}
           onSell={() => handleNav("sell")}
         />
 
@@ -247,13 +308,13 @@ export default function RentalHubDashboard({ onNavigate }) {
             <SearchResults
               results={results}
               onView={(p) => setActiveProduct(p)}
-              onRent={(p) => handleNav("rent", p)}
+              onRent={(p) => handleRent(p)}
             />
           ) : (
             <Feed
               items={products}
               onView={(p) => setActiveProduct(p)}
-              onRent={(p) => handleNav("rent", p)}
+              onRent={(p) => handleRent(p)}
             />
           )}
         </div>
@@ -263,9 +324,32 @@ export default function RentalHubDashboard({ onNavigate }) {
         <ProductModal
           product={activeProduct}
           onClose={() => setActiveProduct(null)}
-          onRent={(p) => handleNav("rent", p)}
+          onRent={(p) => {
+            setActiveProduct(null);
+            handleRent(p);
+          }}
         />
       )}
+
+      {/* Rent Booking Flow Modal */}
+      {rentingProduct && (
+        <RentBookingModal
+          product={rentingProduct}
+          isOpen={Boolean(rentingProduct)}
+          onClose={() => setRentingProduct(null)}
+          onBookingSuccess={(booking) => {
+            flash(`Rental request for "${booking.productTitle}" sent to owner! Total: ₹${booking.totalPrice}`);
+          }}
+        />
+      )}
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+        initialMode={authMode}
+      />
 
       {toast && <Toast message={toast} />}
     </div>
@@ -274,7 +358,7 @@ export default function RentalHubDashboard({ onNavigate }) {
 
 /* ------------------------------ Sidebar ------------------------------ */
 
-function Sidebar({ onNav }) {
+function Sidebar({ currentUser, onNav, onOpenAuth, onLogout }) {
   const navItems = [
     { key: "recent", label: "Recently viewed", icon: Clock },
     { key: "about", label: "About us", icon: Info },
@@ -282,37 +366,83 @@ function Sidebar({ onNav }) {
 
   return (
     <aside
-      className="hidden sm:flex flex-col w-[220px] shrink-0 px-5 pt-8 pb-6"
+      className="hidden sm:flex flex-col w-[230px] shrink-0 px-5 pt-8 pb-6"
       style={{
         background: PALETTE.blush,
         borderRight: `1px solid ${PALETTE.mauve}`,
       }}
     >
-      <button
-        onClick={() => onNav("profile")}
-        className="group flex items-center gap-3 mb-8 text-left"
-      >
-        <span
-          className="flex items-center justify-center rounded-full w-11 h-11 shrink-0 transition-transform group-hover:scale-105"
-          style={{
-            background: PALETTE.rose,
-            boxShadow: `0 2px 8px ${PALETTE.rose}55`,
-          }}
-        >
-          <User size={20} color="#fff" strokeWidth={2} />
-        </span>
-        <span>
-          <span
-            className="block text-[15px] leading-tight font-medium"
-            style={{ color: PALETTE.ink }}
+      {currentUser ? (
+        <div className="mb-6">
+          <button
+            onClick={() => onNav("profile")}
+            className="group flex items-center gap-3 w-full text-left"
           >
-            Your profile
-          </span>
-          <span className="block text-xs" style={{ color: PALETTE.inkSoft }}>
-            View & edit
-          </span>
-        </span>
-      </button>
+            <span
+              className="flex items-center justify-center rounded-full w-11 h-11 shrink-0 font-bold text-white text-base transition-transform group-hover:scale-105"
+              style={{
+                background: PALETTE.rose,
+                boxShadow: `0 2px 8px ${PALETTE.rose}55`,
+              }}
+            >
+              {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : <User size={20} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className="block text-[14px] leading-tight font-semibold truncate"
+                style={{ color: PALETTE.ink }}
+              >
+                {currentUser.name || "User"}
+              </span>
+              <span className="block text-[11px] truncate opacity-70" style={{ color: PALETTE.inkSoft }}>
+                {currentUser.email}
+              </span>
+            </span>
+          </button>
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={() => onNav("profile")}
+              className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-[#ECCBC9] text-[#4A3335] hover:opacity-80 transition-opacity"
+            >
+              Edit Profile
+            </button>
+            <button
+              onClick={onLogout}
+              className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors flex items-center gap-1"
+            >
+              <LogOut size={11} />
+              Logout
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-6">
+          <div
+            className="p-3.5 rounded-2xl text-center"
+            style={{ background: PALETTE.petal, border: `1px solid ${PALETTE.mauve}` }}
+          >
+            <p className="text-xs font-semibold mb-2" style={{ color: PALETTE.ink }}>
+              Welcome to RentalHub
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={() => onOpenAuth("login")}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ background: PALETTE.rose }}
+              >
+                <LogIn size={13} />
+                Sign In
+              </button>
+              <button
+                onClick={() => onOpenAuth("register")}
+                className="w-full py-1.5 px-3 rounded-xl text-xs font-semibold transition-colors bg-white/70 hover:bg-white text-[#4A3335]"
+              >
+                Register
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className="h-px w-full mb-4"
@@ -362,6 +492,9 @@ function Header({
   sort,
   setSort,
   isSearching,
+  currentUser,
+  onOpenAuth,
+  onLogout,
   onSell,
 }) {
   return (
@@ -369,8 +502,18 @@ function Header({
       className="px-6 md:px-10 pt-8 pb-6"
       style={{ borderBottom: `1px solid ${PALETTE.mauve}` }}
     >
-      <div className="flex items-start justify-between gap-6 mb-6">
-        <div className="flex-1" />
+      <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="flex-1 hidden md:block">
+          {currentUser ? (
+            <div className="flex items-center gap-2 text-xs font-medium text-[#7A5A5C]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Logged in as <strong className="text-[#4A3335]">{currentUser.name || currentUser.email}</strong></span>
+            </div>
+          ) : (
+            <span className="text-xs text-[#8A6668]">Explore local rentals near you</span>
+          )}
+        </div>
+
         <h1
           className="text-center flex-1 select-none"
           style={{
@@ -382,20 +525,51 @@ function Header({
         >
           Rental<span style={{ fontStyle: "italic", color: PALETTE.rose }}>hub</span>
         </h1>
-        <div className="flex-1 flex justify-end">
+
+        <div className="flex-1 flex items-center justify-end gap-2.5">
+          {!currentUser ? (
+            <>
+              <button
+                onClick={() => onOpenAuth("login")}
+                className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-colors hover:bg-[#ECCBC9]"
+                style={{ color: PALETTE.ink, border: `1px solid ${PALETTE.mauve}` }}
+              >
+                <LogIn size={14} />
+                Sign In
+              </button>
+              <button
+                onClick={() => onOpenAuth("register")}
+                className="hidden sm:block px-3.5 py-2 rounded-full text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ background: PALETTE.rose }}
+              >
+                Register
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onLogout}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 transition-colors border border-red-200"
+              title="Log out"
+            >
+              <LogOut size={13} />
+              Logout
+            </button>
+          )}
+
           <button
             onClick={onSell}
-            className="flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5"
+            className="flex items-center gap-1.5 sm:gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold text-white transition-transform hover:-translate-y-0.5"
             style={{
               background: `linear-gradient(135deg, ${PALETTE.rose}, #c08386)`,
               boxShadow: `0 6px 16px ${PALETTE.rose}66`,
             }}
           >
             <Plus size={16} strokeWidth={2.5} />
-            Sell an item
+            <span>List Item</span>
           </button>
         </div>
       </div>
+
 
       {/* search bar */}
       <div className="max-w-2xl mx-auto">
